@@ -14,10 +14,33 @@ class MusicPlayer:
             music_directories (dict): 包含不同場景音樂的字典，格式為 {'default': [路徑列表], 'game': [路徑列表], ...}
             default_volume (float): 預設音量，範圍 0.0 到 1.0
         """
+        # 嘗試設定音訊輸出 (參考 mp3.py)
+        print("MusicPlayer: 嘗試設定 ALSA 音訊驅動並強制輸出到 3.5mm...")
+        try:
+            os.environ["SDL_AUDIODRIVER"] = "alsa"
+            # 注意: amixer 指令可能需要特定權限，並且 numid=3 不一定總是對應 3.5mm 孔
+            # 建議先在終端機測試 `amixer scontrols` 查看可用控制項
+            # 以及 `amixer cset numid=3 1` 是否是你期望的 (1 通常是 Headphones, 2 是 HDMI)
+            # 如果不確定，可以先註解掉下面這行，或者確保它不會因錯誤而中斷初始化
+            return_code = os.system("amixer cset numid=3 1 >/dev/null 2>&1") # 將輸出重定向以保持簡潔
+            if return_code == 0:
+                print("MusicPlayer: amixer 指令成功設定音訊輸出 (可能為 3.5mm)。")
+            else:
+                print(f"MusicPlayer 警告: amixer 指令執行失敗或未找到 (返回碼: {return_code})。音訊輸出可能不是 3.5mm。")
+        except Exception as e:
+            print(f"MusicPlayer 警告: 設定音訊輸出時發生錯誤: {e}")
+
         # 初始化 pygame mixer
         if not pygame.mixer.get_init():
-            pygame.mixer.init()
-            print("已初始化 pygame mixer")
+            try:
+                pygame.mixer.init() # 可以嘗試傳遞參數，如 frequency, size, channels, buffer
+                print("MusicPlayer: pygame.mixer 初始化成功。")
+            except pygame.error as e:
+                print(f"MusicPlayer 錯誤: pygame.mixer.init() 失敗: {e}")
+                print("             背景音樂功能將不可用。請檢查音訊設備和驅動。")
+                self.music_directories = {} # 清空音樂列表，避免後續錯誤
+                self.is_playing = False
+                return # Mixer 初始化失敗，後續操作無意義
         
         # 設定預設音樂目錄和播放列表
         self.music_directories = music_directories or {
@@ -35,15 +58,20 @@ class MusicPlayer:
             ]
         }
         
-        # 檢查音樂檔案是否存在
+        valid_music_directories = {}
         for category, paths in self.music_directories.items():
             valid_paths = []
-            for path in paths:
-                if os.path.isfile(path):
-                    valid_paths.append(path)
-                else:
-                    print(f"警告: 找不到音樂檔案 '{path}'")
-            self.music_directories[category] = valid_paths
+            if paths: # 確保 paths 不是 None 或空列表
+                for path in paths:
+                    if os.path.isfile(path):
+                        valid_paths.append(path)
+                    else:
+                        print(f"MusicPlayer 警告: 找不到音樂檔案 '{path}' (類別: {category})")
+            if valid_paths: # 只有當類別中有有效音樂時才加入
+                valid_music_directories[category] = valid_paths
+            else:
+                print(f"MusicPlayer 警告: 類別 '{category}' 中沒有有效的音樂檔案。")
+        self.music_directories = valid_music_directories
         
         # 目前播放的音樂類別和檔案路徑
         self.current_category = None
@@ -55,7 +83,7 @@ class MusicPlayer:
         # 播放狀態
         self.is_playing = False
         
-        print("音樂播放器初始化完成")
+        print("音樂播放器模組初始化完成。")
     
     def set_volume(self, volume):
         """

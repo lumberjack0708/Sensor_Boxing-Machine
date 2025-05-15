@@ -3,12 +3,13 @@
 處理遊戲核心互動邏輯，例如從感測器獲取情緒指數。
 """
 import time # 可能在未來擴展時需要
+from led_controller import Color # 為了在測量時設定顏色
 
 # 這個模組本身不直接依賴硬體函式庫，而是接收已初始化的處理器物件。
 
-def get_player_emotion_index(sensor_handler, emotion_calculator, duration_sec=3):
+def get_player_emotion_index(sensor_handler, emotion_calculator, led_controller=None, duration_sec=3):
     """
-    獲取玩家的情緒指數。
+    獲取玩家的情緒指數，並在測量期間提供 LED 視覺回饋。
     
     過程:
     1. 在指定的時間段內收集壓電薄膜感測器數據
@@ -17,6 +18,7 @@ def get_player_emotion_index(sensor_handler, emotion_calculator, duration_sec=3)
     參數:
         sensor_handler: SensorHandler 實例
         emotion_calculator: EmotionCalculator 實例
+        led_controller (LedController, optional): LED 控制器實例。
         duration_sec (int): 收集數據的持續時間（秒）
     
     返回:
@@ -34,6 +36,25 @@ def get_player_emotion_index(sensor_handler, emotion_calculator, duration_sec=3)
     # 開始測量
     print(f"開始測量，請在 {duration_sec} 秒內拍打壓電薄膜...")
     
+    # --- 在測量期間的 LED 效果 ---
+    # 我們將在 get_max_voltage_from_all_channels 內部（或此處的迴圈）處理 LED
+    # 為了簡化，這裡暫時不在感測器讀取迴圈內頻繁操作 LED，而是在開始和結束時操作。
+    # 更複雜的同步動畫需要執行緒或非阻塞的感測器讀取。
+    # 作為替代，我們可以在 sensor_handler 的 _read_single_channel_max_voltage 內部加入燈效更新點。
+    # 或者，在 main.py 呼叫此函式前後控制燈效。
+    # 目前，我們讓 main.py 在此函數調用前就設定好燈效（例如閃爍），此函數專注於獲取數據。
+    # 如果要在此函數內做持續的燈效，sensor_handler.get_max_voltage_from_all_channels 需要被重構為非阻塞，
+    # 或者我們在這裡重新實現一個帶有燈效更新的讀取迴圈。
+
+    # 這裡我們採用一個簡化的方式：修改 sensor_handler 讓它可以接收 led_controller
+    # 或者，更簡單的是，讓此函數 *不* 控制測量期間的連續LED動畫，
+    # 而是 main.py 在呼叫此函數前後設定一個燈效，例如呼吸燈開始，然後讀取，然後呼吸燈結束。
+
+    # 此處暫不改變 LED。測量期間的 LED 由 main.py 在呼叫此函數之前設定的燈效控制。
+    # 如果 LedController 的 breathing_light 是阻塞的，main.py 需要在另一個執行緒中運行它，
+    # 或者 breathing_light 需要被設計為非阻塞的（例如，只更新一幀）。
+    # 假設 main.py 會處理測量開始前的燈效。
+
     try:
         # 獲取最大電壓值
         max_voltage = sensor_handler.get_max_voltage_from_all_channels(duration_sec=duration_sec)

@@ -2,6 +2,7 @@ import pygame
 import random
 import sys
 import RPi.GPIO as GPIO # 新增：匯入 RPi.GPIO 函式庫
+import time
 
 # 初始化 Pygame
 pygame.init()
@@ -180,7 +181,18 @@ def game(starting_mileage_for_session: int = INITIAL_MILEAGE): # 使用 INITIAL_
     # 全域的 score 應該是 0。reset_game() 會確保這一點。
     # 第一次計算 current_mileage 時，它將是 starting_mileage_for_session - 0。
 
+    last_jump_time = 0
+    jump_cooldown = 0.15  # 150ms 冷卻
+    
     while running:
+        now = time.time()
+        # 印出所有 GPIO 狀態
+        if gpio_ready:
+            gpio_states = {pin: GPIO.input(pin) for pin in PIEZO_PINS}
+            print(f"[偵錯] 幀: GPIO 狀態 {gpio_states}")
+        
+        # 印出每一幀的跳躍狀態與遊戲主狀態
+        print(f"[偵錯] 幀: is_jumping={is_jumping}, player_rect.bottom={player_rect.bottom}, player_y_velocity={player_y_velocity}, game_active={game_active}, obstacle_speed={obstacle_speed}, score={score}, obstacle_timer={obstacle_timer}, obstacle_spawn_time={obstacle_spawn_time}")
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
@@ -192,22 +204,36 @@ def game(starting_mileage_for_session: int = INITIAL_MILEAGE): # 使用 INITIAL_
             if gpio_ready and not is_jumping:
                 jump_triggered_by_piezo = False
                 for pin in PIEZO_PINS:
-                    if GPIO.input(pin) == GPIO.LOW: # 假設壓電薄膜觸發時，對應的 GPIO 腳位為低電位
-                        jump_triggered_by_piezo = True
-                        break # 任何一個感測器觸發即可跳躍
-                
+                    if GPIO.input(pin) == GPIO.LOW:
+                        print(f"[偵錯] {now:.3f} GPIO{pin} 觸發, is_jumping={is_jumping}, 距上次跳躍{now-last_jump_time:.3f}s")
+                        if now - last_jump_time > jump_cooldown:
+                            jump_triggered_by_piezo = True
+                            last_jump_time = now
+                            print(f"[偵錯] 跳躍觸發成功，更新 last_jump_time={last_jump_time:.3f}")
+                        else:
+                            print(f"[偵錯] 跳躍冷卻中，忽略本次觸發 (冷卻剩餘: {jump_cooldown - (now - last_jump_time):.3f}s)")
+                        break
                 if jump_triggered_by_piezo:
+                    print(f"[偵錯] 跳躍啟動前狀態: is_jumping={is_jumping}, player_y_velocity={player_y_velocity}, player_rect={player_rect}, score={score}, obstacle_speed={obstacle_speed}, obstacle_timer={obstacle_timer}")
                     is_jumping = True
                     player_y_velocity = jump_strength
+                    print(f"[偵錯] 跳躍啟動！player_y_velocity={player_y_velocity}, player_rect.y={player_rect.y}, 時間戳={now:.3f}")
+            else:
+                print(f"[偵錯] game_active={game_active}, 跳躍未觸發")
             
             # 玩家跳躍
             if is_jumping:
+                before_y = player_rect.y
+                before_v = player_y_velocity
                 player_y_velocity += player_gravity
-                player_rect.y += player_y_velocity # 直接修改 player_rect.y
-                if player_rect.bottom >= ground_height: # 檢查底部是否觸地
+                player_rect.y += player_y_velocity
+                print(f"[偵錯] 跳躍中... player_rect.y={player_rect.y}, player_rect.bottom={player_rect.bottom}, player_y_velocity={player_y_velocity}")
+                if player_rect.bottom >= ground_height - 1: # 容許微小誤差
+                    print(f"[偵錯] 落地前: player_rect.y={before_y}, player_y_velocity={before_v}")
                     player_rect.bottom = ground_height
                     is_jumping = False
                     player_y_velocity = 0
+                    print(f"[偵錯] 落地！player_rect.y={player_rect.y}, is_jumping={is_jumping}, 時間戳={now:.3f}")
             # player_rect.y 的賦值已在跳躍邏輯中處理
 
             # 根據移動距離增加分數
@@ -259,7 +285,9 @@ def game(starting_mileage_for_session: int = INITIAL_MILEAGE): # 使用 INITIAL_
             # 碰撞檢測
             for obs_data in obstacles:
                 if player_rect.colliderect(obs_data['rect']):
+                    print(f"[偵錯] 碰撞發生！玩家座標: {player_rect}, 障礙物座標: {obs_data['rect']}, game_active(前)={game_active}, 時間戳={now:.3f}")
                     game_active = False 
+                    print(f"[偵錯] game_active 已設為 False（因碰撞）")
             
             if game_active: # 再次檢查 game_active，因為碰撞可能已將其設為 False
                 # 使用傳入的 starting_mileage_for_session 來計算當前的里程
@@ -267,6 +295,7 @@ def game(starting_mileage_for_session: int = INITIAL_MILEAGE): # 使用 INITIAL_
                 if current_mileage <= 0:
                     current_mileage = 0 # 確保里程數不顯示為負
                     game_active = False
+                    print(f"[偵錯] game_active 已設為 False（因情緒歸零）")
 
             # --- 繪圖 ---
             screen.fill(WHITE)

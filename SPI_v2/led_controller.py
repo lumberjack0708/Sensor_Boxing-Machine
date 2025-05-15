@@ -5,7 +5,7 @@ from rpi_ws281x import Adafruit_NeoPixel, Color
 class LedController:
     """控制 WS281x LED 燈條的類別。"""
 
-    def __init__(self, led_pin=18, led_count=8, freq_hz=800000, dma=10, invert=False, brightness=50, channel=0):
+    def __init__(self, led_pin=18, led_count=60, freq_hz=800000, dma=10, invert=False, brightness=25, channel=0):
         """
         初始化 LED 控制器。
 
@@ -21,6 +21,7 @@ class LedController:
         self.strip = Adafruit_NeoPixel(led_count, led_pin, freq_hz, dma, invert, brightness, channel)
         self.rainbow_j_offset = 0  # 用於彩虹動畫的內部狀態
         self.is_on = False # 追蹤燈條是否已 begin
+        self.default_brightness = brightness # 儲存初始亮度
 
     def begin(self):
         """啟動 LED 燈條通訊。"""
@@ -86,6 +87,77 @@ class LedController:
             self.strip.setPixelColor(i, Color(0, 0, 0))
         self.strip.show()
 
+    def set_brightness(self, brightness_value, show=True):
+        """設定 LED 燈條的亮度。"""
+        if not self.strip or not self.is_on:
+            return
+        new_brightness = max(0, min(255, int(brightness_value)))
+        self.strip.setBrightness(new_brightness)
+        if show:
+            self.strip.show()
+
+    def reset_to_default_brightness(self, show=True):
+        """恢復到初始設定的亮度。"""
+        self.set_brightness(self.default_brightness, show=show)
+
+    def static_color(self, color, show=True):
+        """將所有 LED 設定為指定的靜態顏色。"""
+        if not self.strip or not self.is_on:
+            return
+        for i in range(self.strip.numPixels()):
+            self.strip.setPixelColor(i, color)
+        if show: self.strip.show()
+        # print(f"LED 設定為靜態顏色: R={color.r} G={color.g} B={color.b}") # 減少日誌
+
+    def breathing_light(self, color, peak_brightness_fraction=1.0, duration_sec=3, cycles=None, steps_per_cycle=50):
+        """
+        執行呼吸燈效果。
+        參數:
+            color (Color): 呼吸燈的基礎顏色。
+            peak_brightness_fraction (float): 呼吸到最亮時，相對於LED初始化亮度的比例 (0.0-1.0)。
+            duration_sec (int): 如果 cycles 未指定，則為總持續時間。
+            cycles (int, optional): 呼吸次數。如果指定，則忽略 duration_sec。
+            steps_per_cycle (int): 每個呼吸週期（暗->亮->暗）的步數。
+        """
+        if not self.strip or not self.is_on:
+            return
+        
+        original_brightness = self.strip.getBrightness()
+        target_peak_brightness = int(original_brightness * peak_brightness_fraction)
+        if target_peak_brightness == 0 and original_brightness > 0: # 避免完全不亮，除非原始亮度就是0
+            target_peak_brightness = min(10, original_brightness) # 至少有點亮度
+        if target_peak_brightness == 0: # 如果原始亮度也是0，則無法呼吸
+             self.static_color(Color(0,0,0)); return
+
+        # print(f"DEBUG: Breathing light. Original Brightness: {original_brightness}, Target Peak: {target_peak_brightness}")
+
+        half_steps = steps_per_cycle // 2
+        step_delay = (duration_sec / (cycles if cycles else 1)) / steps_per_cycle if cycles else duration_sec / steps_per_cycle
+
+        num_cycles = cycles if cycles else int(duration_sec / (step_delay * steps_per_cycle))
+        if num_cycles == 0: num_cycles = 1
+
+        for _ in range(num_cycles):
+            # Fade in (暗到亮)
+            for i in range(half_steps):
+                current_b = int((i / half_steps) * target_peak_brightness)
+                self.set_brightness(max(0,min(255,current_b)), show=False) # 確保亮度在範圍內
+                self.static_color(color, show=True) # 用 static_color 來設定顏色，setBrightness 後需要 show
+                # self.strip.show() # static_color 內部已有 show
+                time.sleep(step_delay)
+            
+            # Fade out (亮到暗)
+            for i in range(half_steps, 0, -1):
+                current_b = int((i / half_steps) * target_peak_brightness)
+                self.set_brightness(max(0,min(255,current_b)), show=False)
+                self.static_color(color, show=True)
+                # self.strip.show()
+                time.sleep(step_delay)
+        
+        self.set_brightness(original_brightness) # 恢復原始亮度
+        self.clear() # 呼吸結束後清除，或恢復到某個狀態
+        print("呼吸燈效果完成。")
+
     def show_flash_pattern(self, flash_color=Color(50, 50, 50), times=3, duration_on=0.1, duration_off=0.1):
         """
         顯示一個簡單的閃爍燈效。
@@ -100,38 +172,88 @@ class LedController:
             return
         
         for _ in range(times):
-            for i in range(self.strip.numPixels()):
-                self.strip.setPixelColor(i, flash_color)
-            self.strip.show()
+            if not self.is_on: break
+            self.static_color(flash_color)
             time.sleep(duration_on)
+            if not self.is_on: break
             self.clear()
             time.sleep(duration_off)
 
-    def set_brightness(self, brightness_value):
-        """設定 LED 燈條的亮度。"""
-        if not self.strip or not self.is_on:
-            return
-        # Adafruit_NeoPixel 庫似乎沒有直接的方法在初始化後更改亮度而不重新 begin
-        # 或者，如果 strip 物件允許直接修改 brightness 屬性並呼叫 show() 生效，則可以這樣做。
-        # 經查 rpi_ws281x， Adafruit_NeoPixel 有 setBrightness 方法
-        # 但它似乎是全域的，或者需要在 show() 之前呼叫
-        # 最安全的方式可能是在初始化時設定好，或者接受它就是固定的
-        # 為了安全，這裡我們假設亮度在初始化時設定，或提供一個警告
-        # print("警告: 動態調整亮度可能需要重新初始化 LED 燈條，此處未實作。")
-        # 實際上 Adafruit_NeoPixel 有 setBrightness 方法，可以直接使用
-        new_brightness = max(0, min(255, int(brightness_value)))
-        self.strip.setBrightness(new_brightness)
-        self.strip.show() # 更新顯示以應用新的亮度
-        # print(f"LED 亮度已設定為: {new_brightness}") # 可選的除錯訊息
+    def color_wipe(self, color, wait_ms=50):
+        """依序點亮每顆 LED，呈現指定顏色的 wiping 效果。"""
+        if not self.strip or not self.is_on: return
+        for i in range(self.strip.numPixels()):
+            self.strip.setPixelColor(i, color)
+            self.strip.show()
+            time.sleep(wait_ms / 1000.0)
+        print("Color wipe 完成。")
+
+    def theater_chase(self, color, wait_ms=50, iterations=10):
+        """戲院追逐燈效果。"""
+        if not self.strip or not self.is_on: return
+        for j in range(iterations):
+            for q in range(3):
+                for i in range(0, self.strip.numPixels(), 3):
+                    if i + q < self.strip.numPixels(): # 邊界檢查
+                        self.strip.setPixelColor(i + q, color)
+                self.strip.show()
+                time.sleep(wait_ms / 1000.0)
+                for i in range(0, self.strip.numPixels(), 3):
+                    if i + q < self.strip.numPixels(): # 邊界檢查
+                        self.strip.setPixelColor(i + q, 0)
+        print("Theater chase 完成。")
+
+    def rainbow_effect(self, wait_ms=20, iterations=1):
+        """整條 LED 同步漸變彩虹 (不同於 rainbowCycle)。"""
+        if not self.strip or not self.is_on: return
+        print("開始 Rainbow effect...")
+        for j in range(256 * iterations):
+            for i in range(self.strip.numPixels()):
+                self.strip.setPixelColor(i, self._wheel((i + j) & 255))
+            self.strip.show()
+            time.sleep(wait_ms / 1000.0)
+            if not self.is_on: break # 允許中途停止
+        print("Rainbow effect 完成。")
+
+    def rainbow_cycle_effect(self, wait_ms=20, iterations=5):
+        """彩虹顏色平均分布在整條 LED 上，並循環。"""
+        if not self.strip or not self.is_on: return
+        print("開始 Rainbow cycle effect...")
+        for j in range(256 * iterations):
+            for i in range(self.strip.numPixels()):
+                self.strip.setPixelColor(i, self._wheel((int(i * 256 / self.strip.numPixels()) + j) & 255))
+            self.strip.show()
+            time.sleep(wait_ms / 1000.0)
+            if not self.is_on: break # 允許中途停止
+        print("Rainbow cycle effect 完成。")
+
+    def theater_chase_rainbow(self, wait_ms=50, iterations=1, cycle_limit=256):
+        """彩虹版戲院追逐燈效果。"""
+        if not self.strip or not self.is_on: return
+        print(f"開始 Theater chase rainbow (iterations={iterations}, cycle_limit={cycle_limit}, wait_ms={wait_ms})...")
+        for _ in range(iterations): 
+            for j in range(cycle_limit): # 使用 cycle_limit 控制顏色變化範圍
+                for q in range(3):
+                    for i in range(0, self.strip.numPixels(), 3):
+                        if i + q < self.strip.numPixels():
+                            self.strip.setPixelColor(i + q, self._wheel((i + j) % 255)) # 顏色仍然用 %255 來循環
+                    self.strip.show()
+                    time.sleep(wait_ms / 1000.0)
+                    for i in range(0, self.strip.numPixels(), 3):
+                        if i + q < self.strip.numPixels():
+                            self.strip.setPixelColor(i + q, 0)
+                if not self.is_on: break 
+            if not self.is_on: break 
+        print("Theater chase rainbow 完成。")
 
 # 使用範例 (如果此檔案被直接執行)
 if __name__ == '__main__':
     # LED 設定範例
-    LED_COUNT = 8
+    LED_COUNT = 60
     LED_PIN = 18       # GPIO pin connected to the pixels (must support PWM!).
     LED_FREQ_HZ = 800000  # LED signal frequency in hertz (usually 800khz)
     LED_DMA = 10       # DMA channel to use for generating signal (try 10)
-    LED_BRIGHTNESS = 50 # Set to 0 for darkest and 255 for brightest
+    LED_BRIGHTNESS = 25 # Set to 0 for darkest and 255 for brightest
     LED_INVERT = False   # True to invert the signal (when using NPN transistor level shift)
     LED_CHANNEL = 0      # Set to '1' for GPIOs 13, 19, 41, 45 or 53
 
@@ -161,6 +283,14 @@ if __name__ == '__main__':
             for _ in range(256):
                 controller.update_rainbow_cycle_frame()
                 time.sleep(0.02)
+
+            print("\n測試靜態紅色...")
+            controller.static_color(Color(255, 0, 0))
+            time.sleep(2)
+            controller.clear()
+            print("\n測試呼吸藍色 (3秒, 2個循環)...")
+            controller.breathing_light(Color(0, 0, 255), duration_sec=3, cycles=2)
+            controller.clear()
 
         except KeyboardInterrupt:
             print("\n程式結束。")

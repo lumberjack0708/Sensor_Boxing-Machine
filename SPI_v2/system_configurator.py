@@ -19,10 +19,10 @@ from spi_lcd_display import SpiLcdDisplay
 # --- 硬體和模組設定常數 ---
 # LED 燈條設定
 LED_PIN        = 18
-LED_COUNT      = 8 
+LED_COUNT      = 60
 LED_FREQ_HZ    = 800000
 LED_DMA        = 10
-LED_BRIGHTNESS = 50 
+LED_BRIGHTNESS = 25
 LED_INVERT     = False
 LED_CHANNEL    = 0
 
@@ -68,6 +68,7 @@ MUSIC_DIRECTORIES = {
     ]
 }
 MUSIC_DEFAULT_VOLUME = 0.5
+MUSIC_GAME_VOLUME = 0.8     # 遊戲進行時的音量 (0.0-1.0)
 
 def initialize_systems():
     """
@@ -156,7 +157,8 @@ def initialize_systems():
                 player_img_path=PLAYER_IMAGE_PATH,
                 obstacle_img_path=OBSTACLE_IMAGE_PATH,
                 sensor_handler_instance=initialized_components.get('sensor_handler'), 
-                piezo_jump_threshold=PIEZO_JUMP_THRESHOLD
+                piezo_jump_threshold=PIEZO_JUMP_THRESHOLD,
+                led_controller_instance=initialized_components.get('led_controller')
             )
             if hdmi_game.is_initialized:
                 initialized_components['hdmi_game_engine'] = hdmi_game
