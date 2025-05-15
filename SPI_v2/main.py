@@ -1,5 +1,8 @@
 import time
 import RPi.GPIO as GPIO
+import pygame # Pygame 的 init/quit 需要在此層級管理
+import signal
+import sys # 用於 sys.exit()
 # import board # 由 system_configurator 內部處理
 
 # 從新模組匯入初始化函式和控制器類別 (儘管類別主要由 configurator 內部使用)
@@ -9,145 +12,170 @@ from .system_configurator import initialize_systems, cleanup_systems, BUTTON_PIN
 # from .emotion_calculator import EmotionCalculator # 已由 system_configurator 處理
 # from .game_on_lcd import LcdGameController # 已由 system_configurator 處理
 
-import pygame # Pygame 的 quit 需要在 main 的 finally 中處理
-
 from .game_interactions import get_player_emotion_index # 匯入新的互動邏輯函式
 
-# --- 主要的硬體/模組實例將從 initialize_systems() 獲取 ---
-led_strip_controller = None
-sensor_input_handler = None
-emotion_processor = None
-lcd_game_manager = None
-
-# --- 全域常數 (如果還有 main.py 特有的) ---
+# --- 全域常數 ---
 GAME_START_THRESHOLD = 10 # 啟動遊戲所需的情緒指數閾值
 
 # ===== 主程式 =====
 def main():
     """應用程式主入口點，處理主事件迴圈和遊戲狀態。"""
-    print("\n=== 互動式解壓小遊戲 v2.0 ===")
+    print("\n=== 互動式解壓小遊戲 v2.1 (HDMI 版本) ===")
     print("正在啟動系統...")
     
-    # 初始化所有系統元件
+    initialized_systems = None # 確保在 finally 中可用
     try:
         initialized_systems = initialize_systems()
         
-        # 檢查初始化是否成功
-        if not initialized_systems['success']:
-            print("警告: 系統部分初始化失敗，但將嘗試繼續執行...")
+        if not initialized_systems.get('success', False):
+            print("嚴重錯誤: 系統關鍵部分初始化失敗。請檢查上方日誌。程式即將退出。")
+            # 即使初始化失敗，也嘗試清理已部分初始化的資源
+            if initialized_systems: # 確保字典本身存在
+                cleanup_systems(initialized_systems)
+            else: # 如果 initialize_systems 本身就崩了
+                GPIO.cleanup() # 嘗試基本的 GPIO 清理
+                if pygame.get_init(): pygame.quit()
+            sys.exit(1)
         
-        # 從初始化結果中獲取各個模組實例
-        led_controller = initialized_systems['led_controller']
-        sensor_handler = initialized_systems['sensor_handler']
-        emotion_calculator = initialized_systems['emotion_calculator']
-        lcd_game_controller = initialized_systems['lcd_game_controller']
-        music_player = initialized_systems['music_player']  # 獲取音樂播放器實例
-        
+        led_controller = initialized_systems.get('led_controller')
+        sensor_handler = initialized_systems.get('sensor_handler')
+        emotion_calculator = initialized_systems.get('emotion_calculator')
+        hdmi_game_engine = initialized_systems.get('hdmi_game_engine')
+        spi_lcd_display = initialized_systems.get('spi_lcd_display')
+        music_player = initialized_systems.get('music_player')
+
+        # 檢查核心模組是否都已成功初始化
+        if not all([led_controller, sensor_handler, emotion_calculator, hdmi_game_engine, spi_lcd_display]):
+            print("警告: 部分核心模組未能成功初始化，程式功能可能受限或無法執行。")
+            # 根據需求決定是否在此處退出，目前選擇繼續，讓使用者看到錯誤訊息
+
         # 設定信號處理以優雅地處理 Ctrl+C
-        def signal_handler(sig, frame):
-            print("\n接收到中斷信號，正在清理資源...")
-            running[0] = False  # 通知主迴圈退出
+        running_main_loop = [True] # 使用列表以便在回調函數中修改
+        def signal_handler_main(sig, frame):
+            print("\n接收到中斷信號 (Ctrl+C)，正在準備退出主迴圈...")
+            running_main_loop[0] = False
         
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
+        signal.signal(signal.SIGINT, signal_handler_main)
+        signal.signal(signal.SIGTERM, signal_handler_main)
         
-        # 使用列表儲存狀態，以便在回調函數中修改
-        running = [True]
-        waiting_for_button = [True]
-        rainbow_j_offset = [0]
+        waiting_for_button = True
+        rainbow_j_offset = 0
         
-        # 啟動默認背景音樂
         if music_player:
             music_player.play_random_music(category='default', loop=True)
         
+        if spi_lcd_display:
+            spi_lcd_display.show_standby_message("按鈕啟動")
+        else:
+            print("SPI LCD 未初始化，無法顯示待機訊息。")
+
         print("\n系統已就緒，等待按鈕按下以開始測量情緒...")
         
-        # 主事件迴圈
-        try:
-            while running[0]:
-                current_time = time.time()
+        while running_main_loop[0]:
+            if waiting_for_button:
+                if led_controller:
+                    led_controller.update_rainbow_cycle_frame(rainbow_j_offset)
+                    rainbow_j_offset = (rainbow_j_offset + 1) % 256
+                time.sleep(0.05) 
                 
-                # 待機時的彩虹動畫更新
-                if waiting_for_button[0]:
-                    led_controller.update_rainbow_cycle_frame(rainbow_j_offset[0])
-                    rainbow_j_offset[0] = (rainbow_j_offset[0] + 1) % 256
-                    time.sleep(0.05)  # 控制動畫速度
-                
-                # 檢查按鈕狀態
-                if waiting_for_button[0] and GPIO.input(BUTTON_PIN) == GPIO.HIGH:
-                    print("\n按鈕已按下，開始測量情緒...")
-                    waiting_for_button[0] = False
+                if GPIO.input(BUTTON_PIN) == GPIO.HIGH:
+                    print("\n按鈕已按下！")
+                    waiting_for_button = False
                     
-                    # 按鈕閃爍提示
-                    led_controller.show_flash_pattern()
-                    
-                    # 暫停背景音樂
-                    if music_player:
-                        music_player.fade_out(500)  # 淡出當前音樂
-                    
-                    # 獲取情緒指數
-                    emotion_index = get_player_emotion_index(
-                        sensor_handler, 
-                        emotion_calculator
-                    )
-                    
-                    if emotion_index > 0:
-                        print(f"\n測量完成！負面情緒指數: {emotion_index}")
-                        
-                        # 切換到遊戲音樂
-                        if music_player:
-                            music_player.switch_to_category('game', loop=True)
-                        
-                        # 啟動 LCD 遊戲
-                        if lcd_game_controller:
-                            print("\n啟動 LCD 遊戲...")
-                            # 重設彩虹動畫狀態
-                            led_controller.reset_rainbow_animation_state()
-                            lcd_game_controller.play_game(emotion_index)
-                            
-                            # 遊戲結束後播放結束音樂
-                            if music_player:
-                                music_player.switch_to_category('game_over', loop=False)
-                                time.sleep(2)  # 播放一小段結束音樂
-                                music_player.switch_to_category('default', loop=True)  # 切回默認音樂
-                        else:
-                            print("錯誤: LCD 遊戲控制器未初始化，無法啟動遊戲")
+                    if led_controller: led_controller.show_flash_pattern()
+                    if music_player: music_player.fade_out(300)
+                    if spi_lcd_display: spi_lcd_display.display_message(["測量情緒中..."], font_size='medium')
+
+                    emotion_index = 0
+                    if sensor_handler and emotion_calculator:
+                        emotion_index = get_player_emotion_index(
+                            sensor_handler, emotion_calculator, duration_sec=3
+                        )
                     else:
-                        print("\n情緒指數太低，未達到啟動遊戲的標準。請再試一次。")
+                        print("錯誤: 感測器或情緒計算器未初始化，無法獲取情緒指數。")
+                        emotion_index = GAME_START_THRESHOLD + 1 # 模擬一個值以便測試流程
+
+                    if emotion_index >= GAME_START_THRESHOLD:
+                        print(f"測量完成！負面情緒指數: {emotion_index}")
+                        if spi_lcd_display: spi_lcd_display.display_message([f"情緒值: {emotion_index}", "準備開始遊戲"], font_size='small')
                         
-                        # 切回默認音樂
+                        if music_player: music_player.switch_to_category('game', loop=True)
+                        
+                        game_results = None
+                        if hdmi_game_engine:
+                            print("啟動 HDMI 遊戲...")
+                            if led_controller: led_controller.clear() # 遊戲時關閉指示燈或用特定模式
+                            
+                            game_results = hdmi_game_engine.run_game(emotion_index)
+                            print(f"HDMI 遊戲結束。結果: {game_results}")
+                        else:
+                            print("錯誤: HDMI 遊戲引擎未初始化，無法啟動遊戲。")
+                            # 模擬遊戲結果以便流程繼續
+                            game_results = {'score': 0, 'final_mileage': emotion_index, 'reason': 'engine_fail'}
+
+                        # 處理遊戲結果
                         if music_player:
-                            music_player.switch_to_category('default', loop=True)
+                            music_player.switch_to_category('game_over', loop=False)
+                            # time.sleep(2) # 讓遊戲結束音樂播放一會兒，如果太短，user可能聽不到
+
+                        if spi_lcd_display and game_results:
+                            spi_lcd_display.display_game_results(
+                                game_results.get('score', 0),
+                                game_results.get('final_mileage', 0),
+                                game_results.get('reason', 'unknown')
+                            )
+                        
+                        # 等待一段時間讓玩家看 LCD 結果，同時播放結束音樂
+                        if music_player and music_player.is_music_playing():
+                            wait_start_time = time.time()
+                            while music_player.is_music_playing() and (time.time() - wait_start_time < 5):
+                                time.sleep(0.1) # 等待音樂播放或最多5秒
+                            music_player.stop() # 確保音樂停了
+                        elif not music_player:
+                            time.sleep(3) # 如果沒有音樂播放器，固定等待3秒
+                        
+                        if music_player: music_player.switch_to_category('default', loop=True)
+
+                    else:
+                        print(f"負面情緒指數 ({emotion_index}) 過低 (未達到 {GAME_START_THRESHOLD})。請再試一次。")
+                        if spi_lcd_display: spi_lcd_display.display_message(["情緒不足", "請再試一次"], font_size='medium')
+                        time.sleep(2)
+                        if music_player: music_player.switch_to_category('default', loop=True)
                     
-                    # 返回等待按鈕狀態
-                    waiting_for_button[0] = True
+                    if spi_lcd_display: spi_lcd_display.show_standby_message("按鈕啟動")
+                    waiting_for_button = True
                     print("\n系統已返回待機狀態，等待按鈕按下...")
-                
-                # 處理 Pygame 事件以防止事件隊列積累
-                if pygame.get_init():
-                    for event in pygame.event.get():
-                        if event.type == pygame.QUIT:
-                            running[0] = False
-                
-                # 在不是動畫更新的情況下添加短暫延遲以降低 CPU 使用率
-                if not waiting_for_button[0]:
-                    time.sleep(0.01)
-        
-        finally:
-            print("\n主迴圈結束，正在清理資源...")
-            # 清理資源
-            cleanup_systems(initialized_systems)
             
-            # 保證 Pygame 退出
+            # 處理 Pygame 事件以保持視窗回應 (主要由 HdmiGameEngine 內部處理，但以防萬一)
+            # 也確保在遊戲引擎未運行時，主迴圈仍能處理 QUIT 事件
             if pygame.get_init():
-                pygame.quit()
-    
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        print("Pygame QUIT 事件觸發主迴圈退出。")
+                        running_main_loop[0] = False
+            
+            if not running_main_loop[0]: # 如果信號或事件要求退出
+                break
+            
+            # 在非等待按鈕且非 LED 更新的快速迴圈中，稍作延遲
+            if not waiting_for_button:
+                 time.sleep(0.01)
+
+    except KeyboardInterrupt:
+        print("\n主程式被使用者中斷 (Ctrl+C)。")
     except Exception as e:
-        print(f"程式運行過程中發生錯誤: {e}")
+        print(f"主程式運行過程中發生未預期錯誤: {e}")
         import traceback
         traceback.print_exc()
-    
-    print("\n程式結束。")
+    finally:
+        print("\n主迴圈結束或發生錯誤，正在執行最終清理...")
+        if initialized_systems: # 只有在初始化字典成功建立時才傳遞它
+            cleanup_systems(initialized_systems)
+        else: # 極端情況下，如果 initialized_systems 都沒能建立
+            GPIO.cleanup()
+            if pygame.get_init():
+                pygame.quit()
+        print("程式完全結束。")
 
 if __name__ == "__main__":
     main()
