@@ -72,9 +72,9 @@ class SpiLcdDisplay:
     def _load_font(self):
         """載入用於顯示文字的字型。"""
         # 優先使用 PIL 的 ImageFont，因為它更適合靜態文字渲染
-        font_size_small = max(10, int(self.height / 20))
-        font_size_medium = max(14, int(self.height / 15))
-        font_size_large = max(18, int(self.height / 12))
+        font_size_small = max(10, int(self.height / 18))
+        font_size_medium = max(14, int(self.height / 12))
+        font_size_large = max(18, int(self.height / 9))
         font_path_pil = None
         
         common_font_files = ["wqy-microhei.ttc", "DroidSansFallbackFull.ttf", "DejaVuSans.ttf"]
@@ -201,12 +201,12 @@ class SpiLcdDisplay:
             f"價值: {score}",
             f"情緒: {final_mileage}"
         ]
-        self.display_message(lines_to_display, font_size='medium', text_align='center', v_align='center')
+        self.display_message(lines_to_display, font_size='large', text_align='center', v_align='center')
 
     def show_standby_message(self, message="等待操作..."):
         """顯示待機訊息。"""
         self.clear_display()
-        self.display_message([message], font_size='medium', text_align='center', v_align='center')
+        self.display_message([message], font_size='large', text_align='center', v_align='center')
 
     def cleanup(self):
         """清理資源，例如關閉 LCD 背光。"""

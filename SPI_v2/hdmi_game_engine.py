@@ -182,7 +182,7 @@ class HdmiGameEngine:
         title_rendered = self.font_large.render(title_text_str, True, self.BLACK)
         score_rendered = self.font_medium.render(f"獲得價值: {self.score}", True, self.BLACK)
         mileage_rendered = self.font_medium.render(f"剩餘情緒: {self.current_mileage}", True, self.BLACK)
-        instr_rendered = self.font_small.render("按 R 重玩 / Q 離開遊戲", True, (80,80,80))
+        instr_rendered = self.font_small.render("按 Q 鍵返回主選單", True, (80,80,80))
 
         text_y = int(self.screen_height * 0.25)
         line_h_L = title_rendered.get_height()
@@ -207,9 +207,6 @@ class HdmiGameEngine:
                     action_taken = "QUIT_VIA_WINDOW_CLOSE"
                     waiting_for_input = False
                 if evt.type == pygame.KEYDOWN:
-                    if evt.key == pygame.K_r: 
-                        action_taken = "RESTART"
-                        waiting_for_input = False
                     if evt.key == pygame.K_q: 
                         action_taken = "QUIT"
                         waiting_for_input = False
@@ -231,10 +228,10 @@ class HdmiGameEngine:
 
         print("開始 HDMI 遊戲會話...")
         while running_this_session:
-            piezo_triggered_jump = False
-            if self.game_active and not self.is_jumping and self.sensor_handler:
-                if self.sensor_handler.check_any_piezo_trigger(threshold=self.piezo_jump_threshold):
-                    piezo_triggered_jump = True
+            # piezo_triggered_jump = False # 註解掉壓電感測器跳躍相關變數
+            # if self.game_active and not self.is_jumping and self.sensor_handler: # 註解掉壓電感測器檢查
+            #     if self.sensor_handler.check_any_piezo_trigger(threshold=self.piezo_jump_threshold): # 註解掉壓電感測器檢查
+            #         piezo_triggered_jump = True # 註解掉壓電感測器跳躍相關變數
             
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -250,10 +247,10 @@ class HdmiGameEngine:
             
             if not running_this_session: break
 
-            if piezo_triggered_jump and self.game_active and not self.is_jumping:
-                self.is_jumping = True
-                self.player_y_velocity = self.JUMP_STRENGTH
-                print("HdmiGameEngine: 偵測到拍擊，觸發跳躍！")
+            # if piezo_triggered_jump and self.game_active and not self.is_jumping: # 註解掉使用壓電感測器觸發跳躍的邏輯
+            #     self.is_jumping = True
+            #     self.player_y_velocity = self.JUMP_STRENGTH
+            #     print("HdmiGameEngine: 偵測到拍擊，觸發跳躍！")
 
             if self.game_active:
                 # 遊戲邏輯更新
@@ -317,16 +314,72 @@ class HdmiGameEngine:
 
             else: # game_active is False (遊戲結束)
                 user_choice = self._game_over_screen_on_hdmi()
-                if user_choice == "RESTART":
-                    self._reset_game(initial_mileage) 
-                elif user_choice == "QUIT" or user_choice == "QUIT_VIA_WINDOW_CLOSE":
+                if user_choice == "QUIT" or user_choice == "QUIT_VIA_WINDOW_CLOSE":
                     running_this_session = False
                     if user_choice == "QUIT_VIA_WINDOW_CLOSE": self.game_over_reason = "quit_event"
+                else:
+                    running_this_session = False
             
             self.clock.tick(self.FPS)
         
         print(f"HDMI 遊戲會話結束 (原因: {self.game_over_reason or '未知'}).")
         return {'score': self.score, 'final_mileage': self.current_mileage, 'reason': self.game_over_reason}
+
+    def show_hdmi_standby_screen(self, title="互動式解壓遊戲", line1="按按鈕開始"):
+        """在 HDMI 螢幕上顯示待機或提示訊息。"""
+        if not self.is_initialized:
+            print("錯誤: HdmiGameEngine 未初始化，無法顯示待機畫面。")
+            return
+
+        self.screen.fill(self.WHITE)
+        
+        title_rendered = self.font_large.render(title, True, self.BLACK)
+        line1_rendered = self.font_medium.render(line1, True, self.BLACK)
+        
+        text_y = int(self.screen_height * 0.3)
+        line_h_L = title_rendered.get_height()
+        line_h_M = line1_rendered.get_height()
+        pad = int(self.screen_height * 0.05)
+
+        self.screen.blit(title_rendered, (self.screen_width // 2 - title_rendered.get_width() // 2, text_y))
+        text_y += line_h_L + pad
+        self.screen.blit(line1_rendered, (self.screen_width // 2 - line1_rendered.get_width() // 2, text_y))
+        
+        pygame.display.flip()
+        print(f"HDMI 螢幕已更新為待機畫面: '{title} - {line1}'")
+
+    def display_pre_game_countdown(self, emotion_index):
+        """在 HDMI 螢幕上顯示情緒指數和遊戲開始倒數。"""
+        if not self.is_initialized:
+            print("錯誤: HdmiGameEngine 未初始化，無法顯示倒數畫面。")
+            return
+
+        self.screen.fill(self.WHITE)
+        line1_text = f"情緒壓力指數: {emotion_index}"
+        line2_text = "遊戲即將開始..."
+        
+        l1_rendered = self.font_medium.render(line1_text, True, self.BLACK)
+        l2_rendered = self.font_small.render(line2_text, True, self.BLACK)
+
+        y_start = self.screen_height // 2 - (l1_rendered.get_height() + l2_rendered.get_height() + 10) // 2
+        self.screen.blit(l1_rendered, (self.screen_width // 2 - l1_rendered.get_width() // 2, y_start))
+        self.screen.blit(l2_rendered, (self.screen_width // 2 - l2_rendered.get_width() // 2, y_start + l1_rendered.get_height() + 10))
+        pygame.display.flip()
+        pygame.time.wait(2000) # 顯示情緒指數2秒
+
+        for i in range(3, 0, -1):
+            self.screen.fill(self.WHITE)
+            countdown_text = self.font_large.render(str(i), True, self.BLACK)
+            self.screen.blit(countdown_text, (self.screen_width // 2 - countdown_text.get_width() // 2, self.screen_height // 2 - countdown_text.get_height() // 2))
+            pygame.display.flip()
+            pygame.time.wait(1000)
+        
+        self.screen.fill(self.WHITE)
+        go_text = self.font_large.render("GO!", True, (0, 128, 0)) # 綠色 GO
+        self.screen.blit(go_text, (self.screen_width // 2 - go_text.get_width() // 2, self.screen_height // 2 - go_text.get_height() // 2))
+        pygame.display.flip()
+        pygame.time.wait(500) # GO 顯示半秒
+        print("HDMI 遊戲開始前倒數完成。")
 
     def cleanup(self):
         """清理 Pygame 資源。通常由主程式在最後統一處理 pygame.quit()。"""

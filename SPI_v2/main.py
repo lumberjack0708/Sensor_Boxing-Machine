@@ -6,13 +6,13 @@ import sys # 用於 sys.exit()
 # import board # 由 system_configurator 內部處理
 
 # 從新模組匯入初始化函式和控制器類別 (儘管類別主要由 configurator 內部使用)
-from .system_configurator import initialize_systems, cleanup_systems, BUTTON_PIN # 直接從設定檔取用 BUTTON_PIN
+from system_configurator import initialize_systems, cleanup_systems, BUTTON_PIN # 直接從設定檔取用 BUTTON_PIN
 # from .led_controller import LedController # 已由 system_configurator 處理
 # from .sensor_handler import SensorHandler # 已由 system_configurator 處理
 # from .emotion_calculator import EmotionCalculator # 已由 system_configurator 處理
 # from .game_on_lcd import LcdGameController # 已由 system_configurator 處理
 
-from .game_interactions import get_player_emotion_index # 匯入新的互動邏輯函式
+from game_interactions import get_player_emotion_index # 匯入新的互動邏輯函式
 
 # --- 全域常數 ---
 GAME_START_THRESHOLD = 10 # 啟動遊戲所需的情緒指數閾值
@@ -54,6 +54,12 @@ def main():
         def signal_handler_main(sig, frame):
             print("\n接收到中斷信號 (Ctrl+C)，正在準備退出主迴圈...")
             running_main_loop[0] = False
+            # 嘗試主動發送一個 Pygame QUIT 事件，以便遊戲引擎迴圈能更快響應
+            if pygame.get_init():
+                try:
+                    pygame.event.post(pygame.event.Event(pygame.QUIT))
+                except Exception as e:
+                    print(f"在信號處理器中發送 pygame.QUIT 事件時發生錯誤: {e}")
         
         signal.signal(signal.SIGINT, signal_handler_main)
         signal.signal(signal.SIGTERM, signal_handler_main)
@@ -68,6 +74,9 @@ def main():
             spi_lcd_display.show_standby_message("按鈕啟動")
         else:
             print("SPI LCD 未初始化，無法顯示待機訊息。")
+
+        if hdmi_game_engine: # 新增：程式啟動時更新 HDMI 待機畫面
+            hdmi_game_engine.show_hdmi_standby_screen(title="互動式解壓遊戲", line1="按按鈕開始")
 
         print("\n系統已就緒，等待按鈕按下以開始測量情緒...")
         
@@ -84,7 +93,7 @@ def main():
                     
                     if led_controller: led_controller.show_flash_pattern()
                     if music_player: music_player.fade_out(300)
-                    if spi_lcd_display: spi_lcd_display.display_message(["測量情緒中..."], font_size='medium')
+                    if spi_lcd_display: spi_lcd_display.display_message(["測量情緒中..."], font_size='large')
 
                     emotion_index = 0
                     if sensor_handler and emotion_calculator:
@@ -97,8 +106,11 @@ def main():
 
                     if emotion_index >= GAME_START_THRESHOLD:
                         print(f"測量完成！負面情緒指數: {emotion_index}")
-                        if spi_lcd_display: spi_lcd_display.display_message([f"情緒值: {emotion_index}", "準備開始遊戲"], font_size='small')
+                        if spi_lcd_display: spi_lcd_display.display_message([f"情緒值: {emotion_index}", "準備開始遊戲"], font_size='medium')
                         
+                        if hdmi_game_engine: # 新增：呼叫遊戲開始前倒數
+                            hdmi_game_engine.display_pre_game_countdown(emotion_index)
+
                         if music_player: music_player.switch_to_category('game', loop=True)
                         
                         game_results = None
@@ -138,11 +150,14 @@ def main():
 
                     else:
                         print(f"負面情緒指數 ({emotion_index}) 過低 (未達到 {GAME_START_THRESHOLD})。請再試一次。")
-                        if spi_lcd_display: spi_lcd_display.display_message(["情緒不足", "請再試一次"], font_size='medium')
+                        if spi_lcd_display: spi_lcd_display.display_message(["情緒不足", "請再試一次"], font_size='large')
                         time.sleep(2)
                         if music_player: music_player.switch_to_category('default', loop=True)
                     
                     if spi_lcd_display: spi_lcd_display.show_standby_message("按鈕啟動")
+                    if hdmi_game_engine: # 新增：遊戲結束後更新 HDMI 待機畫面
+                        hdmi_game_engine.show_hdmi_standby_screen(title="準備就緒", line1="按按鈕重新開始")
+
                     waiting_for_button = True
                     print("\n系統已返回待機狀態，等待按鈕按下...")
             
@@ -163,18 +178,56 @@ def main():
 
     except KeyboardInterrupt:
         print("\n主程式被使用者中斷 (Ctrl+C)。")
+    except SystemExit as e:
+        print(f"程式因 sys.exit({e.code}) 退出。") # 處理 sys.exit
     except Exception as e:
         print(f"主程式運行過程中發生未預期錯誤: {e}")
         import traceback
         traceback.print_exc()
     finally:
-        print("\n主迴圈結束或發生錯誤，正在執行最終清理...")
-        if initialized_systems: # 只有在初始化字典成功建立時才傳遞它
-            cleanup_systems(initialized_systems)
-        else: # 極端情況下，如果 initialized_systems 都沒能建立
-            GPIO.cleanup()
-            if pygame.get_init():
+        print("\n主迴圈結束或發生錯誤/退出，正在執行最終清理...")
+        
+        # 首先清理各個模組的資源
+        # 確保 initialized_systems 存在並且是一個字典
+        if 'initialized_systems' in locals() and isinstance(initialized_systems, dict):
+            cleanup_systems(initialized_systems) 
+        else:
+            print("警告: initialized_systems 未正確初始化，可能部分模組資源未清理。")
+
+        # 然後執行全域性的 GPIO 清理
+        # 只有在 GPIO 模式被設定過的情況下才執行 cleanup
+        gpio_mode_was_set = False
+        try:
+            # GPIO.getmode() 只有在模式設定後才返回值，否則可能引發異常或返回 None 取決於 RPi.GPIO 版本
+            # 更安全的方式是使用一個旗標，或者依賴 RPi.GPIO 在未設定模式時 cleanup() 的行為 (通常是安全的)
+            # 但為了明確，我們可以假設 initialize_systems 設定了模式
+            # 或者在 initialize_systems 成功後設定一個全域旗標
+            if GPIO.getmode() is not None: # 檢查模式是否已設定
+                 gpio_mode_was_set = True
+        except RuntimeError: # GPIO.getmode() might raise RuntimeError if no mode set
+            pass # gpio_mode_was_set 保持 False
+        except Exception: # 其他可能的異常
+            pass # gpio_mode_was_set 保持 False
+
+        if gpio_mode_was_set:
+            try:
+                GPIO.cleanup()
+                print("GPIO (來自 main.py) 已清理。")
+            except Exception as e:
+                print(f"GPIO 清理時發生錯誤: {e}")
+        else:
+            print("GPIO 模式似乎未曾設定，跳過 GPIO 清理。")
+
+        # 最後執行 Pygame 的退出
+        if pygame.get_init():
+            try:
                 pygame.quit()
+                print("Pygame (來自 main.py) 已退出。")
+            except Exception as e:
+                print(f"Pygame 退出時發生錯誤: {e}")
+        else:
+            print("Pygame 未初始化，跳過 Pygame 退出。")
+            
         print("程式完全結束。")
 
 if __name__ == "__main__":
