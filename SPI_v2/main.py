@@ -3,7 +3,7 @@ import RPi.GPIO as GPIO
 # import board # 由 system_configurator 內部處理
 
 # 從新模組匯入初始化函式和控制器類別 (儘管類別主要由 configurator 內部使用)
-from .system_configurator import initialize_systems, BTN_PIN # 直接從設定檔取用 BTN_PIN
+from .system_configurator import initialize_systems, cleanup_systems, BUTTON_PIN # 直接從設定檔取用 BUTTON_PIN
 # from .led_controller import LedController # 已由 system_configurator 處理
 # from .sensor_handler import SensorHandler # 已由 system_configurator 處理
 # from .emotion_calculator import EmotionCalculator # 已由 system_configurator 處理
@@ -22,106 +22,133 @@ lcd_game_manager = None
 # --- 全域常數 (如果還有 main.py 特有的) ---
 GAME_START_THRESHOLD = 10 # 啟動遊戲所需的情緒指數閾值
 
-if __name__ == "__main__":
-    # 初始化所有系統和模組
-    # initialize_systems() 會回傳 (led_controller, sensor_handler, emotion_calc, lcd_game_ctrl)
+# ===== 主程式 =====
+def main():
+    """應用程式主入口點，處理主事件迴圈和遊戲狀態。"""
+    print("\n=== 互動式解壓小遊戲 v2.0 ===")
+    print("正在啟動系統...")
+    
+    # 初始化所有系統元件
     try:
-        led_strip_controller, sensor_input_handler, emotion_processor, lcd_game_manager = initialize_systems()
-    except Exception as e:
-        print(f"系統初始化過程中發生嚴重錯誤: {e}")
-        print("程式無法繼續執行。")
-        # 確保在退出前進行可能的清理
-        if 'led_strip_controller' in locals() and led_strip_controller and hasattr(led_strip_controller, 'is_on') and led_strip_controller.is_on:
-            led_strip_controller.clear()
-        GPIO.cleanup() # 即使設定失敗，也嘗試清理 GPIO
-        if pygame.get_init(): pygame.quit()
-        exit(1)
-
-    # 檢查各模組初始化狀態
-    # 注意：initialize_systems 內部已有日誌，這裡的檢查是為了 main 的流程控制
-    led_ok = led_strip_controller and hasattr(led_strip_controller, 'strip') and hasattr(led_strip_controller, 'is_on') and led_strip_controller.is_on
-    # sensor_ok 的判斷現在更依賴 sensor_handler 是否為 None 及其 is_initialized 和 adc_channels 狀態
-    sensor_ok = sensor_input_handler is not None and \
-                  hasattr(sensor_input_handler, 'is_initialized') and sensor_input_handler.is_initialized and \
-                  hasattr(sensor_input_handler, 'adc_channels') and bool(sensor_input_handler.adc_channels)
-    lcd_game_ok = lcd_game_manager and hasattr(lcd_game_manager, 'disp') and lcd_game_manager.disp
-    emotion_calc_ok = emotion_processor is not None
-
-    if not led_ok: print("主程式警告: LED 控制器似乎未完全運作。")
-    if not sensor_ok: print("主程式警告: 感測器處理器似乎未完全運作或通道未設定。")
-    if not lcd_game_ok: print("主程式警告: LCD 遊戲控制器似乎未完全運作。")
-    if not emotion_calc_ok: print("主程式警告: 情緒計算器未實例化。")
-
-    print("\n系統準備就緒。按下按鈕開始遊戲。")
-    if led_ok: print("待機模式：LED 彩虹燈效。")
-
-    try:
-        while True:
-            if led_ok: led_strip_controller.update_rainbow_cycle_frame()
-
-            if GPIO.input(BTN_PIN) == GPIO.HIGH:
-                print("\n按鈕已按下！")
+        initialized_systems = initialize_systems()
+        
+        # 檢查初始化是否成功
+        if not initialized_systems['success']:
+            print("警告: 系統部分初始化失敗，但將嘗試繼續執行...")
+        
+        # 從初始化結果中獲取各個模組實例
+        led_controller = initialized_systems['led_controller']
+        sensor_handler = initialized_systems['sensor_handler']
+        emotion_calculator = initialized_systems['emotion_calculator']
+        lcd_game_controller = initialized_systems['lcd_game_controller']
+        music_player = initialized_systems['music_player']  # 獲取音樂播放器實例
+        
+        # 設定信號處理以優雅地處理 Ctrl+C
+        def signal_handler(sig, frame):
+            print("\n接收到中斷信號，正在清理資源...")
+            running[0] = False  # 通知主迴圈退出
+        
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+        
+        # 使用列表儲存狀態，以便在回調函數中修改
+        running = [True]
+        waiting_for_button = [True]
+        rainbow_j_offset = [0]
+        
+        # 啟動默認背景音樂
+        if music_player:
+            music_player.play_random_music(category='default', loop=True)
+        
+        print("\n系統已就緒，等待按鈕按下以開始測量情緒...")
+        
+        # 主事件迴圈
+        try:
+            while running[0]:
+                current_time = time.time()
                 
-                if led_ok:
-                    led_strip_controller.clear()
-                    time.sleep(0.1)
-                    led_strip_controller.show_flash_pattern(times=2, duration_on=0.05, duration_off=0.05)
+                # 待機時的彩虹動畫更新
+                if waiting_for_button[0]:
+                    led_controller.update_rainbow_cycle_frame(rainbow_j_offset[0])
+                    rainbow_j_offset[0] = (rainbow_j_offset[0] + 1) % 256
+                    time.sleep(0.05)  # 控制動畫速度
                 
-                # 使用 game_interactions 模組的函式來獲取情緒指數
-                negative_emotion_index = get_player_emotion_index(
-                    sensor_handler_instance=sensor_input_handler, 
-                    emotion_calculator_instance=emotion_processor,
-                    sensor_is_ready=sensor_ok, 
-                    emotion_calc_is_ready=emotion_calc_ok,
-                    duration_sec=3
-                )
-                # get_player_emotion_index 內部已有詳細的 print 輸出
-
-                if negative_emotion_index <= GAME_START_THRESHOLD:
-                    print(f"負面情緒指數 ({negative_emotion_index}) 過低 (未超過 {GAME_START_THRESHOLD})。請再試一次。")
-                    # TODO: 可以在 LCD上顯示"情緒不足"的提示 (如果 lcd_game_ok)
-                    print("回到待機模式...")
-                    while GPIO.input(BTN_PIN) == GPIO.HIGH: time.sleep(0.05)
-                    if led_ok: led_strip_controller.reset_rainbow_animation_state()
-                    continue
-
-                if lcd_game_ok:
-                    print(f"啟動 LCD 遊戲，負面情緒指數: {negative_emotion_index}")
-                    lcd_game_manager.play_game(negative_emotion_index)
-                    print("LCD 遊戲結束。")
-                else:
-                    print("錯誤: LCD 遊戲控制器未就緒。遊戲無法啟動。")
-
-                print("回到待機模式...")
-                while GPIO.input(BTN_PIN) == GPIO.HIGH: time.sleep(0.05)
-                print("按鈕已釋放。")
-                if led_ok: led_strip_controller.reset_rainbow_animation_state()
-
-            time.sleep(0.02)
-
-    except KeyboardInterrupt:
-        print("\n程式被使用者中斷。")
+                # 檢查按鈕狀態
+                if waiting_for_button[0] and GPIO.input(BUTTON_PIN) == GPIO.HIGH:
+                    print("\n按鈕已按下，開始測量情緒...")
+                    waiting_for_button[0] = False
+                    
+                    # 按鈕閃爍提示
+                    led_controller.show_flash_pattern()
+                    
+                    # 暫停背景音樂
+                    if music_player:
+                        music_player.fade_out(500)  # 淡出當前音樂
+                    
+                    # 獲取情緒指數
+                    emotion_index = get_player_emotion_index(
+                        sensor_handler, 
+                        emotion_calculator
+                    )
+                    
+                    if emotion_index > 0:
+                        print(f"\n測量完成！負面情緒指數: {emotion_index}")
+                        
+                        # 切換到遊戲音樂
+                        if music_player:
+                            music_player.switch_to_category('game', loop=True)
+                        
+                        # 啟動 LCD 遊戲
+                        if lcd_game_controller:
+                            print("\n啟動 LCD 遊戲...")
+                            # 重設彩虹動畫狀態
+                            led_controller.reset_rainbow_animation_state()
+                            lcd_game_controller.play_game(emotion_index)
+                            
+                            # 遊戲結束後播放結束音樂
+                            if music_player:
+                                music_player.switch_to_category('game_over', loop=False)
+                                time.sleep(2)  # 播放一小段結束音樂
+                                music_player.switch_to_category('default', loop=True)  # 切回默認音樂
+                        else:
+                            print("錯誤: LCD 遊戲控制器未初始化，無法啟動遊戲")
+                    else:
+                        print("\n情緒指數太低，未達到啟動遊戲的標準。請再試一次。")
+                        
+                        # 切回默認音樂
+                        if music_player:
+                            music_player.switch_to_category('default', loop=True)
+                    
+                    # 返回等待按鈕狀態
+                    waiting_for_button[0] = True
+                    print("\n系統已返回待機狀態，等待按鈕按下...")
+                
+                # 處理 Pygame 事件以防止事件隊列積累
+                if pygame.get_init():
+                    for event in pygame.event.get():
+                        if event.type == pygame.QUIT:
+                            running[0] = False
+                
+                # 在不是動畫更新的情況下添加短暫延遲以降低 CPU 使用率
+                if not waiting_for_button[0]:
+                    time.sleep(0.01)
+        
+        finally:
+            print("\n主迴圈結束，正在清理資源...")
+            # 清理資源
+            cleanup_systems(initialized_systems)
+            
+            # 保證 Pygame 退出
+            if pygame.get_init():
+                pygame.quit()
+    
     except Exception as e:
-        print(f"\n主迴圈發生未預期錯誤: {e}")
+        print(f"程式運行過程中發生錯誤: {e}")
         import traceback
         traceback.print_exc()
-    finally:
-        print("\n正在清理資源...")
-        if lcd_game_manager: 
-            print("清理 LCD 遊戲控制器...")
-            lcd_game_manager.cleanup()
-        if led_strip_controller and hasattr(led_strip_controller, 'is_on') and led_strip_controller.is_on:
-            print("關閉 LED...")
-            led_strip_controller.clear()
-        
-        # GPIO.cleanup() 應該在主程式的最後執行，確保所有 GPIO 使用都已結束
-        # initialize_systems() 內部設定了 GPIO.setmode 和 GPIO.setup(BTN_PIN)
-        # 所以 main.py 的 finally 負責 cleanup 是合理的。
-        print("清理 GPIO...")
-        GPIO.cleanup()
-        
-        if pygame.get_init():
-            print("關閉 Pygame...")
-            pygame.quit()
-        print("清理完畢，程式結束。")
+    
+    print("\n程式結束。")
+
+if __name__ == "__main__":
+    main()
 

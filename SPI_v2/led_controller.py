@@ -5,20 +5,20 @@ from rpi_ws281x import Adafruit_NeoPixel, Color
 class LedController:
     """控制 WS281x LED 燈條的類別。"""
 
-    def __init__(self, count, pin, freq_hz, dma, invert, brightness, channel):
+    def __init__(self, led_pin=18, led_count=8, freq_hz=800000, dma=10, invert=False, brightness=50, channel=0):
         """
         初始化 LED 控制器。
 
         參數:
-            count (int): LED 燈珠數量。
-            pin (int): 連接到燈條的 GPIO 腳位。
+            led_pin (int): 連接到燈條的 GPIO 腳位。
+            led_count (int): LED 燈珠數量。
             freq_hz (int): LED 訊號頻率。
             dma (int): 用於產生訊號的 DMA 通道。
             invert (bool): 是否反轉訊號 (True/False)。
             brightness (int): 亮度 (0-255)。
             channel (int): LED 通道 (通常為 0)。
         """
-        self.strip = Adafruit_NeoPixel(count, pin, freq_hz, dma, invert, brightness, channel)
+        self.strip = Adafruit_NeoPixel(led_count, led_pin, freq_hz, dma, invert, brightness, channel)
         self.rainbow_j_offset = 0  # 用於彩虹動畫的內部狀態
         self.is_on = False # 追蹤燈條是否已 begin
 
@@ -50,16 +50,28 @@ class LedController:
             pos -= 170
             return Color(0, pos * 3, 255 - pos * 3)
 
-    def update_rainbow_cycle_frame(self):
-        """更新並顯示彩虹循環動畫的下一幀。"""
+    def update_rainbow_cycle_frame(self, j_offset=None):
+        """
+        更新並顯示彩虹循環動畫的下一幀。
+        
+        參數:
+            j_offset (int, optional): 可選的外部偏移值。如果提供，則使用此值而不是內部 rainbow_j_offset。
+                                     這允許外部控制動畫狀態。
+        """
         if not self.strip or not self.is_on:
             return
         
+        # 使用提供的 j_offset 或內部狀態
+        current_offset = j_offset if j_offset is not None else self.rainbow_j_offset
+        
         for i in range(self.strip.numPixels()):
-            pixel_color_pos = (int(i * 256 / self.strip.numPixels()) + self.rainbow_j_offset) & 255
+            pixel_color_pos = (int(i * 256 / self.strip.numPixels()) + current_offset) & 255
             self.strip.setPixelColor(i, self._wheel(pixel_color_pos))
         self.strip.show()
-        self.rainbow_j_offset = (self.rainbow_j_offset + 1) % (256 * 5) # 讓彩虹流動，與原 main.py 邏輯保持一致
+        
+        # 只有在使用內部狀態時才更新 rainbow_j_offset
+        if j_offset is None:
+            self.rainbow_j_offset = (self.rainbow_j_offset + 1) % 256
 
     def reset_rainbow_animation_state(self):
         """重設彩虹動畫的狀態，使其從頭開始。"""
@@ -114,28 +126,32 @@ class LedController:
 
 # 使用範例 (如果此檔案被直接執行)
 if __name__ == '__main__':
-    # LED 設定範例 (與 main.py 中的參數一致)
-    LED_COUNT = 60
+    # LED 設定範例
+    LED_COUNT = 8
     LED_PIN = 18       # GPIO pin connected to the pixels (must support PWM!).
     LED_FREQ_HZ = 800000  # LED signal frequency in hertz (usually 800khz)
     LED_DMA = 10       # DMA channel to use for generating signal (try 10)
-    LED_BRIGHTNESS = 25 # Set to 0 for darkest and 255 for brightest
+    LED_BRIGHTNESS = 50 # Set to 0 for darkest and 255 for brightest
     LED_INVERT = False   # True to invert the signal (when using NPN transistor level shift)
     LED_CHANNEL = 0      # Set to '1' for GPIOs 13, 19, 41, 45 or 53
 
-    controller = LedController(LED_COUNT, LED_PIN, LED_FREQ_HZ, LED_DMA, LED_INVERT, LED_BRIGHTNESS, LED_CHANNEL)
+    controller = LedController(LED_PIN, LED_COUNT, LED_FREQ_HZ, LED_DMA, LED_INVERT, LED_BRIGHTNESS, LED_CHANNEL)
     controller.begin()
 
     if controller.strip and controller.is_on: # 確保 strip 初始化成功
         print("按下 Ctrl-C 結束範例程式...")
         try:
-            print("顯示彩虹循環...")
-            for _ in range(256 * 5 * 2): # 顯示兩輪彩虹
+            print("顯示彩虹循環 (使用內部狀態)...")
+            for _ in range(256):
                 controller.update_rainbow_cycle_frame()
                 time.sleep(0.02)
-                if _ == 200: # 測試中途重設動畫
-                    print("測試：重設彩虹動畫狀態")
-                    controller.reset_rainbow_animation_state()
+            
+            print("顯示彩虹循環 (使用外部控制的 j_offset)...")
+            external_j = 0
+            for _ in range(256):
+                controller.update_rainbow_cycle_frame(j_offset=external_j)
+                external_j = (external_j + 1) % 256
+                time.sleep(0.02)
             
             print("測試閃爍模式...")
             controller.show_flash_pattern(flash_color=Color(0,0,255), times=2, duration_on=0.2, duration_off=0.2)

@@ -8,6 +8,9 @@ import random
 import sys
 import os
 
+# SensorHandler 類別的匯入是為了類型提示，實際的實例會由外部傳入
+# from .sensor_handler import SensorHandler # 僅用於類型提示
+
 class LcdGameController:
     """控制 ILI9341 LCD 顯示並運行適配版小遊戲的類別。"""
 
@@ -30,7 +33,8 @@ class LcdGameController:
     OBSTACLE_ABSOLUTE_MIN_SPAWN_TIME = 45
 
     def __init__(self, cs_pin_board, dc_pin_board, rst_pin_board, backlight_pin_board=None,
-                 baudrate=48000000, rotation=270, player_img_path='player.png', obstacle_img_path='obstacle.png'):
+                 baudrate=48000000, rotation=270, player_img_path='player.png', obstacle_img_path='obstacle.png',
+                 sensor_handler_instance=None, piezo_jump_threshold=0.1):
         """
         初始化 LCD 顯示器和遊戲資源。
         參數:
@@ -42,12 +46,23 @@ class LcdGameController:
             rotation (int): Display rotation (0, 90, 180, 270).
             player_img_path (str): 玩家圖片檔案路徑。
             obstacle_img_path (str): 障礙物圖片檔案路徑。
+            sensor_handler_instance: 可選的 SensorHandler 實例，用於拍擊跳躍。
+            piezo_jump_threshold (float): 拍擊跳躍的電壓閾值。
         """
         print("正在初始化 LcdGameController...")
         self.disp = None
         self.game_screen_width = 0
         self.game_screen_height = 0
         self.clock = pygame.time.Clock()
+
+        # 儲存 SensorHandler 實例和相關閾值
+        self.sensor_handler = sensor_handler_instance
+        self.piezo_jump_threshold = piezo_jump_threshold
+        if self.sensor_handler and hasattr(self.sensor_handler, 'is_initialized') and self.sensor_handler.is_initialized:
+            print(f"LcdGameController: 已連結 SensorHandler，拍擊跳躍閾值: {self.piezo_jump_threshold}V")
+        else:
+            print("LcdGameController: 未提供有效 SensorHandler，拍擊跳躍功能將不可用。")
+            self.sensor_handler = None # 確保無效時設為 None
 
         try:
             cs_pin = digitalio.DigitalInOut(cs_pin_board)
@@ -255,6 +270,11 @@ class LcdGameController:
 
         print("開始 LCD 遊戲會話...")
         while running_this_session:
+            piezo_triggered_jump = False # 新增：標記是否由拍擊觸發跳躍
+            if self.game_active and not self.is_jumping and self.sensor_handler:
+                if self.sensor_handler.check_any_piezo_trigger(threshold=self.piezo_jump_threshold):
+                    piezo_triggered_jump = True
+            
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running_this_session = False
@@ -270,6 +290,12 @@ class LcdGameController:
             
             if not running_this_session: # 如果 PYGAME.QUIT 事件觸發了退出
                 break
+
+            # 處理拍擊跳躍 (如果在事件迴圈外檢測，確保只觸發一次)
+            if piezo_triggered_jump and self.game_active and not self.is_jumping:
+                self.is_jumping = True
+                self.player_y_velocity = self.JUMP_STRENGTH
+                print("LcdGameController: 偵測到拍擊，觸發跳躍！") # 除錯訊息
 
             if self.game_active:
                 # --- 遊戲邏輯更新 ---
@@ -362,19 +388,39 @@ class LcdGameController:
 if __name__ == "__main__":
     print("LcdGameController 測試開始...")
     try:
-        # 根據您的硬體接線修改這些 board.PinName
-        # 例如: board.CE0, board.D25, board.D24, board.D27
-        # 確保這些腳位沒有被其他程式使用
+        # 為了測試 SensorHandler 的整合，我們需要一個模擬的 SensorHandler
+        class MockSensorHandlerForLcdGame:
+            def __init__(self, is_ready=True, channels_exist=True):
+                self.is_initialized = is_ready
+                self.adc_channels = {} if not channels_exist else {'A0': 'mock'} # 簡單標記通道存在
+                print(f"MockSensorHandlerForLcdGame initialized: ready={is_ready}, channels={bool(self.adc_channels)}")
+
+            def check_any_piezo_trigger(self, threshold):
+                # 模擬隨機觸發，或根據外部輸入觸發
+                # print(f"MockSensor: checking trigger, threshold {threshold}")
+                # return random.choice([True, False, False]) # 1/3 的機率觸發
+                # 為了手動測試，可以提示使用者
+                # val = input("模擬拍擊? (y/N): ")
+                # return val.lower() == 'y'
+                return False # 預設不觸發，以免自動跳躍
+
+        mock_sensor = MockSensorHandlerForLcdGame(is_ready=True)
+        # 如果要測試 sensor_handler 未就緒的情況：
+        # mock_sensor = MockSensorHandlerForLcdGame(is_ready=False)
+
         game_controller = LcdGameController(
             cs_pin_board=board.CE0, 
             dc_pin_board=board.D25, 
             rst_pin_board=board.D24, 
-            backlight_pin_board=board.D27
+            backlight_pin_board=board.D27,
+            sensor_handler_instance=mock_sensor, # 傳入模擬的 sensor_handler
+            piezo_jump_threshold=0.1
         )
         
         if game_controller.disp: # 確保顯示器初始化成功
             session_mileage = 300
             print(f"\n將以 {session_mileage} 的初始情緒開始遊戲...")
+            print("在遊戲中，除了空白鍵/向上鍵，嘗試模擬拍擊 (如果測試代碼支援)。")
             input("按 Enter 鍵開始遊戲測試...")
             game_controller.play_game(session_mileage)
             

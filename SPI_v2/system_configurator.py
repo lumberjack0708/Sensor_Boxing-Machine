@@ -5,12 +5,14 @@ import RPi.GPIO as GPIO
 import board # For LcdGameController and SensorHandler pin definitions
 import pygame # For LcdGameController which inits pygame
 import time # 為 if __name__ == '__main__' 中的測試新增
+import os
 
 # 從專案的各個模組匯入類別
 from .led_controller import LedController, Color # 為 if __name__ == '__main__' 中的 LED 測試新增 Color
 from .sensor_handler import SensorHandler
 from .emotion_calculator import EmotionCalculator
 from .game_on_lcd import LcdGameController
+from .music_player import MusicPlayer  # 新增：導入音樂播放器模組
 
 # --- 硬體和模組設定常數 ---
 # LED 燈條設定
@@ -43,6 +45,22 @@ OBSTACLE_IMAGE_PATH = 'obstacle.png'
 
 # 新增：拍擊跳躍的電壓閾值
 PIEZO_JUMP_THRESHOLD = 0.1 
+
+# --- 音樂播放設定 ---
+MUSIC_DIRECTORIES = {
+    'default': [
+        "/home/pi/RandomGenerate/supercarloverdreamv2.mp3",
+        "/home/pi/RandomGenerate/lovechacha.mp3"
+    ],
+    'game': [
+        "/home/pi/RandomGenerate/supercarloverdreamv2.mp3",
+        "/home/pi/RandomGenerate/lovechacha.mp3"
+    ],
+    'game_over': [
+        "/home/pi/RandomGenerate/supercarloverdreamv2.mp3"
+    ]
+}
+MUSIC_DEFAULT_VOLUME = 0.5  # 預設音量 (0.0-1.0)
 
 def initialize_systems():
     """
@@ -109,11 +127,24 @@ def initialize_systems():
         print(f"初始化 LcdGameController 時發生未預期錯誤: {e}")
         # lcd_game_ctrl 會保持為 None
 
+    # 音樂播放器初始化
+    music_player = None
+    try:
+        music_player = MusicPlayer(
+            music_directories=MUSIC_DIRECTORIES,
+            default_volume=MUSIC_DEFAULT_VOLUME
+        )
+        print("音樂播放器已初始化")
+    except Exception as e:
+        print(f"警告: 音樂播放器初始化失敗: {e}")
+        print("將繼續但無法使用背景音樂功能")
+        # 不將整體成功狀態設為失敗，因為音樂功能不是核心功能
+
     # Pygame 的 quit() 應由應用程式最外層 (main.py 的 finally) 管理。
     # LcdGameController 內部可能會 pygame.init()。
 
     print("系統設定：硬體和模組初始化流程完畢。")
-    return led_controller, sensor_handler, emotion_calc, lcd_game_ctrl
+    return led_controller, sensor_handler, emotion_calc, lcd_game_ctrl, music_player
 
 # 測試函式 (如果直接執行此檔案)
 if __name__ == '__main__':
@@ -121,7 +152,7 @@ if __name__ == '__main__':
     # 為了能在此處測試 Color，需要從 led_controller 匯入它
     # from .led_controller import Color # 已在頂部匯入
     
-    led, sensor, emotion, lcd = initialize_systems()
+    led, sensor, emotion, lcd, music = initialize_systems()
 
     print("\n--- 初始化結果摘要 ---")
     print(f"LED Controller: {'成功' if led and led.strip and led.is_on else '失敗/未完全啟動'}")
@@ -163,6 +194,13 @@ if __name__ == '__main__':
     if lcd and lcd.disp:
         print("\nLCD Game Controller 已初始化，play_game() 可被呼叫。")
         # lcd.cleanup() # 通常在程式結束時呼叫
+
+    if music:
+        print("\n測試音樂播放器...")
+        music.play_random_music(loop=False)
+        time.sleep(3)  # 播放 3 秒
+        music.stop()
+        print("音樂播放器測試完成。")
 
     print("\n清理 GPIO (如果在 initialize_systems 中設定了)...")
     GPIO.cleanup() # 因為 initialize_systems 設定了模式，這裡需要清理
