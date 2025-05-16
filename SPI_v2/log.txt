@@ -1,2 +1,6 @@
+sudo -u pi --preserve-env=DISPLAY,XAUTHORITY,XDG_RUNTIME_DIR \
+  /home/pi/.venv/bin/python /home/pi/RandomGenerate/SPI_v2/main_async.py
+
+
 sudo --preserve-env=DISPLAY,XAUTHORITY,XDG_RUNTIME_DIR \
   /home/pi/.venv/bin/python /home/pi/RandomGenerate/SPI_v2/main_async.py
