@@ -156,6 +156,8 @@ class HdmiGameEngine:
         self.obstacle_spawn_time = self.OBSTACLE_INITIAL_SPAWN_TIME_AVG
         self.game_active = False
         self.game_over_reason = None # e.g., "collision", "mileage_zero", "quit_event"
+        self.player_speed = 1.5  # 初始速度，可自行調整
+        self.player_speed_max = 10.0  # 最大速度
 
     def _reset_game(self, initial_mileage_val):
         """重置遊戲狀態以開始新的一局。"""
@@ -316,6 +318,7 @@ class HdmiGameEngine:
             current_ticks = pygame.time.get_ticks() # 獲取當前時間戳
 
             for event in pygame.event.get():
+                # print(event)  # debug: 印出所有事件
                 if event.type == pygame.QUIT:
                     running_this_session = False
                     self.game_active = False 
@@ -323,16 +326,14 @@ class HdmiGameEngine:
                     break 
                 if self.game_active:
                     if event.type == pygame.KEYDOWN:
-                        # print(f"DEBUG: Keydown event: {event.key}, is_jumping: {self.is_jumping}") 
                         if (event.key == pygame.K_SPACE or event.key == pygame.K_UP):
                             if not self.is_jumping: # 如果在地上，立即跳
                                 self.is_jumping = True
                                 self.player_y_velocity = self.JUMP_STRENGTH
                                 self.jump_buffer_expires_at = 0 # 清除跳躍緩衝
-                                print(f"DEBUG: Jump initiated! Velo: {self.player_y_velocity}")
+                                print('跳躍')
                             else: # 如果在空中，設定跳躍緩衝
                                 self.jump_buffer_expires_at = current_ticks + self.JUMP_BUFFER_DURATION_MS
-                                print(f"DEBUG: Jump key pressed in air. Buffered until: {self.jump_buffer_expires_at}")
             
             if not running_this_session: break
 
@@ -345,11 +346,11 @@ class HdmiGameEngine:
                         self.is_jumping = False
                         self.player_y_velocity = 0
                         print(f"DEBUG: Landed! is_jumping: {self.is_jumping}. Buffer expires at: {self.jump_buffer_expires_at}, Now: {current_ticks}")
-                        
                         # 檢查並執行緩衝的跳躍
                         if self.jump_buffer_expires_at > current_ticks: # 注意這裡用 current_ticks，而不是重新 get_ticks()
                             self.is_jumping = True
                             self.player_y_velocity = self.JUMP_STRENGTH
+                            print('跳躍')
                             print(f"DEBUG: Buffered jump executed! Velo: {self.player_y_velocity}")
                         self.jump_buffer_expires_at = 0 # 無論如何都清除緩衝
                 
@@ -357,6 +358,7 @@ class HdmiGameEngine:
                 if current_score_milestone > self.last_speed_increase_milestone:
                     self.obstacle_speed = min(self.obstacle_speed + 0.2, self.OBSTACLE_SPEED_INITIAL + 3.0)
                     self.last_speed_increase_milestone = current_score_milestone
+                    self.player_speed = min(self.player_speed + 0.1, self.player_speed_max)
 
                 self.obstacle_timer += 1
                 if self.obstacle_timer > self.obstacle_spawn_time:
@@ -394,6 +396,9 @@ class HdmiGameEngine:
                         self.game_active = False
                         self.game_over_reason = "mileage_zero"
 
+                # 玩家橫向位置固定在左側
+                self.player_rect.x = self.player_x_start_offset
+
                 # 繪圖到 HDMI 螢幕
                 self.screen.fill(self.WHITE)
                 pygame.draw.rect(self.screen, self.GROUND_COLOR, (0, self.ground_height, self.screen_width, self.screen_height - self.ground_height))
@@ -412,6 +417,7 @@ class HdmiGameEngine:
                     running_this_session = False
             
             self.clock.tick(self.FPS)
+            # print('Window focused:', pygame.key.get_focused())  # debug: 印出視窗焦點狀態
         
         # 遊戲會話結束，main.py 會根據結果設定 LED，這裡可以先清除或恢復預設
         if self.led_controller:
@@ -496,7 +502,11 @@ class HdmiGameEngine:
     def cleanup(self):
         """清理 Pygame 資源。通常由主程式在最後統一處理 pygame.quit()。"""
         print("HdmiGameEngine 正在清理 (通常無特定操作，pygame.quit() 由主程式管理)。")
-        # pygame.quit() 應該在應用程式最末端呼叫，此處可留空或僅作日誌
+        self.player_image = None
+        self.obstacle_images_scaled = None
+        self.obstacles = []
+        pygame.display.quit()  # 關閉顯示，釋放 VRAM
+        # pygame.quit() 應該在應用程式最末端呼叫
 
 # --- 腳本執行 (測試用) ---
 if __name__ == "__main__":
