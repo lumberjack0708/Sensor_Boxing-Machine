@@ -156,7 +156,7 @@ class HdmiGameEngine:
         self.obstacle_spawn_time = self.OBSTACLE_INITIAL_SPAWN_TIME_AVG
         self.game_active = False
         self.game_over_reason = None # e.g., "collision", "mileage_zero", "quit_event"
-        self.player_speed = 1.5  # 初始速度，可自行調整
+        self.player_speed = 2.0  # 初始速度，可自行調整
         self.player_speed_max = 10.0  # 最大速度
 
     def _reset_game(self, initial_mileage_val):
