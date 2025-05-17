@@ -15,7 +15,7 @@ class HdmiGameEngine:
     GROUND_COLOR = (140, 120, 100)
     FPS = 60 # HDMI螢幕通常可以跑到更高FPS
     PLAYER_GRAVITY = 0.6
-    JUMP_STRENGTH = -17
+    JUMP_STRENGTH = -19
     OBSTACLE_SPEED_INITIAL = 5.0
     INITIAL_MILEAGE_DEFAULT = 350
 
@@ -27,7 +27,7 @@ class HdmiGameEngine:
     OBSTACLE_SPAWN_TIME_RANDOM_RANGE = 30
     OBSTACLE_ABSOLUTE_MIN_SPAWN_TIME = 40
 
-    def __init__(self, screen_width=800, screen_height=600, 
+    def __init__(self, screen_width=1280, screen_height=720, 
                  player_img_path='player.png', obstacle_img_path='obstacle.png',
                  sensor_handler_instance=None, piezo_jump_threshold=0.1,
                  led_controller_instance=None):
@@ -47,9 +47,10 @@ class HdmiGameEngine:
             pygame.init()
             print("Pygame 在 HdmiGameEngine 中初始化。")
         
+        # 建議用較低解析度全螢幕（例如 1280x720）
         self.screen_width = screen_width
         self.screen_height = screen_height
-        self.screen = pygame.display.set_mode((self.screen_width, self.screen_height))
+        self.screen = pygame.display.set_mode((self.screen_width, self.screen_height), pygame.FULLSCREEN)
         pygame.display.set_caption("互動式解壓小遊戲")
         self.clock = pygame.time.Clock()
 
@@ -74,41 +75,51 @@ class HdmiGameEngine:
         print("HdmiGameEngine 初始化完畢。")
 
     def _load_game_assets(self, player_img_path, obstacle_img_path):
-        """載入並縮放遊戲圖片和字型。"""
         print("正在載入遊戲資源 (HDMI)...")
+        scale_factor = 1.5  # 放大 1.5 倍
+
         # 玩家圖片
         try:
             player_image_orig = pygame.image.load(player_img_path).convert_alpha()
-            player_w = max(30, int(self.screen_width * 0.05))
-            player_h = max(40, int(self.screen_height * 0.1))
-            self.player_image = pygame.transform.scale(player_image_orig, (player_w, player_h))
-        except pygame.error as e:
+            orig_w, orig_h = player_image_orig.get_width(), player_image_orig.get_height()
+            target_h = int(self.screen_height * 0.13 * scale_factor)
+            scale_ratio = target_h / orig_h
+            target_w = int(orig_w * scale_ratio)
+            self.player_image = pygame.transform.smoothscale(player_image_orig, (target_w, target_h))
+        except Exception as e:
             print(f"警告：無法載入玩家圖片 '{player_img_path}': {e}。將使用預留位置。")
-            self.player_image = pygame.Surface((max(30, int(self.screen_width * 0.05)), max(40, int(self.screen_height * 0.1))), pygame.SRCALPHA)
+            target_h = int(self.screen_height * 0.13 * scale_factor)
+            target_w = int(target_h * 0.75)
+            self.player_image = pygame.Surface((target_w, target_h), pygame.SRCALPHA)
             pygame.draw.rect(self.player_image, (0,200,0), self.player_image.get_rect())
 
         # 障礙物圖片
         try:
             obstacle_image_orig = pygame.image.load(obstacle_img_path).convert_alpha()
-            # 障礙物高度選項與縮放 (可根據 HDMI 螢幕調整)
+            orig_w, orig_h = obstacle_image_orig.get_width(), obstacle_image_orig.get_height()
             self.obstacle_height_options_scaled = {
-                50: max(20, int(50 * (self.screen_height / 480.0))), # 假設原始設計基於較低解析度
-                75: max(30, int(75 * (self.screen_height / 480.0)))
+                50: int(self.screen_height * 0.07 * scale_factor),
+                75: int(self.screen_height * 0.12 * scale_factor)
             }
-            obstacle_base_w_scaled = max(15, int(30 * (self.screen_width / 800.0)))
             self.obstacle_images_scaled = {}
-            for original_h, scaled_h_val in self.obstacle_height_options_scaled.items():
-                self.obstacle_images_scaled[original_h] = pygame.transform.scale(obstacle_image_orig, (obstacle_base_w_scaled, scaled_h_val))
+            for key, target_h in self.obstacle_height_options_scaled.items():
+                scale_ratio = target_h / orig_h
+                target_w = int(orig_w * scale_ratio)
+                self.obstacle_images_scaled[key] = pygame.transform.smoothscale(obstacle_image_orig, (target_w, target_h))
             self.obstacle_original_height_keys = list(self.obstacle_height_options_scaled.keys())
-        except pygame.error as e:
+        except Exception as e:
             print(f"警告：無法載入障礙物圖片 '{obstacle_img_path}': {e}。將使用預留位置。")
-            self.obstacle_height_options_scaled = {50:30, 75:45}
+            self.obstacle_height_options_scaled = {
+                50: int(self.screen_height * 0.07 * scale_factor),
+                75: int(self.screen_height * 0.12 * scale_factor)
+            }
             self.obstacle_images_scaled = {}
             self.obstacle_original_height_keys = list(self.obstacle_height_options_scaled.keys())
-            for _k, _h in self.obstacle_height_options_scaled.items():
-                surf = pygame.Surface((20,_h), pygame.SRCALPHA)
+            for key, target_h in self.obstacle_height_options_scaled.items():
+                target_w = int(target_h * 0.5)
+                surf = pygame.Surface((target_w, target_h), pygame.SRCALPHA)
                 pygame.draw.rect(surf, (200,0,0), surf.get_rect())
-                self.obstacle_images_scaled[_k] = surf
+                self.obstacle_images_scaled[key] = surf
         print("圖片資源載入並縮放完成 (HDMI)。")
 
         # 字型
@@ -122,7 +133,7 @@ class HdmiGameEngine:
                 if os.path.exists(f_name):
                     font_path = f_name
                     break
-            if font_path:
+            if (font_path):
                 self.font_small = pygame.font.Font(font_path, font_size_small)
                 self.font_medium = pygame.font.Font(font_path, font_size_medium)
                 self.font_large = pygame.font.Font(font_path, font_size_large)
@@ -156,8 +167,8 @@ class HdmiGameEngine:
         self.obstacle_spawn_time = self.OBSTACLE_INITIAL_SPAWN_TIME_AVG
         self.game_active = False
         self.game_over_reason = None # e.g., "collision", "mileage_zero", "quit_event"
-        self.player_speed = 2.0  # 初始速度，可自行調整
-        self.player_speed_max = 10.0  # 最大速度
+        self.player_speed = 6.0  # 初始速度，可自行調整
+        self.player_speed_max = 20.0  # 最大速度
 
     def _reset_game(self, initial_mileage_val):
         """重置遊戲狀態以開始新的一局。"""
@@ -356,9 +367,17 @@ class HdmiGameEngine:
                 
                 current_score_milestone = self.score // 10
                 if current_score_milestone > self.last_speed_increase_milestone:
-                    self.obstacle_speed = min(self.obstacle_speed + 0.2, self.OBSTACLE_SPEED_INITIAL + 3.0)
+                    # 讓加速度隨分數提升而增加（例如線性或指數）
+                    # 這裡用線性：增量 = 0.2 + 0.01 * 分數里程碑
+                    speed_increment = 0.2 + 0.15 * current_score_milestone
+                    self.obstacle_speed = min(
+                        self.obstacle_speed + speed_increment,
+                        self.OBSTACLE_SPEED_INITIAL + 3.0 + 0.5 * current_score_milestone  # 最高速也隨分數提升
+                    )
                     self.last_speed_increase_milestone = current_score_milestone
-                    self.player_speed = min(self.player_speed + 0.1, self.player_speed_max)
+                    # 玩家速度也同步加快
+                    player_speed_increment = 0.1 + 0.05 * current_score_milestone
+                    self.player_speed = min(self.player_speed + player_speed_increment, self.player_speed_max + 0.2 * current_score_milestone)
 
                 self.obstacle_timer += 1
                 if self.obstacle_timer > self.obstacle_spawn_time:
@@ -553,4 +572,4 @@ if __name__ == "__main__":
             game_engine.cleanup()
         if pygame.get_init(): # 確保 pygame 被關閉
             pygame.quit()
-        print("HdmiGameEngine 測試結束。") 
+        print("HdmiGameEngine 測試結束。")
