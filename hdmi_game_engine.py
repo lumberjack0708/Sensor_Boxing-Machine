@@ -310,17 +310,15 @@ class HdmiGameEngine:
             return {'score': 0, 'final_mileage': initial_mileage, 'reason': 'engine_not_initialized'}
 
         # 先執行遊戲開始前序列 (顯示情緒、倒數)
-        self._execute_pre_game_sequence(initial_mileage) # 注意: 這裡傳 initial_mileage 是為了顯示，但可能應該是 emotion_index
-                                                       # 假設 initial_mileage 就是 get_player_emotion_index 返回的值
+        # 這裡傳 【initial_mileage】 是為了顯示，但可能應該是 【emotion_index】；【initial_mileage】 就是 `get_player_emotion_index` 返回的值
+        self._execute_pre_game_sequence(initial_mileage)    
 
         self._reset_game(initial_mileage) # 重置遊戲狀態，並在此處清除事件佇列
         running_this_session = True
         
         if self.led_controller: # 遊戲開始時的 LED 效果
             from led_controller import Color # 確保 Color 可用
-            # 可以選擇一個更動感的遊戲中效果，或者讓 main.py 控制
-            # 這裡我們設定一個遊戲中的基礎色，例如脈動藍
-            # 為了簡單，先設定靜態顏色，之後可以擴展為脈衝
+            # 遊戲開始時的LED效果，測試用先用簡單的藍色，之後可以在這改
             self.led_controller.static_color(Color(0, 25, 75)) 
             print("HdmiGameEngine: 設定遊戲中 LED 燈效。")
 
@@ -358,7 +356,7 @@ class HdmiGameEngine:
                         self.player_y_velocity = 0
                         print(f"DEBUG: Landed! is_jumping: {self.is_jumping}. Buffer expires at: {self.jump_buffer_expires_at}, Now: {current_ticks}")
                         # 檢查並執行緩衝的跳躍
-                        if self.jump_buffer_expires_at > current_ticks: # 注意這裡用 current_ticks，而不是重新 get_ticks()
+                        if self.jump_buffer_expires_at > current_ticks: # 這裡用 current_ticks，而不是重新 get_ticks()
                             self.is_jumping = True
                             self.player_y_velocity = self.JUMP_STRENGTH
                             print('跳躍')
@@ -367,7 +365,7 @@ class HdmiGameEngine:
                 
                 current_score_milestone = self.score // 10
                 if current_score_milestone > self.last_speed_increase_milestone:
-                    # 讓加速度隨分數提升而增加（例如線性或指數）
+                    # 讓加速度隨分數提升而增加
                     # 這裡用線性：增量 = 0.2 + 0.01 * 分數里程碑
                     speed_increment = 0.2 + 0.15 * current_score_milestone
                     self.obstacle_speed = min(

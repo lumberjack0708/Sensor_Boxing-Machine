@@ -40,7 +40,7 @@ class LedController:
     def _wheel(self, pos):
         """內部輔助函式，產生彩虹循環中的單一顏色。"""
         # pos 在 0-255 之間
-        if pos < 0 or pos > 255: # 確保 pos 在範圍內
+        if pos < 0 or pos > 255:
             pos = pos % 256
         if pos < 85:
             return Color(pos * 3, 255 - pos * 3, 0)
@@ -57,7 +57,7 @@ class LedController:
         
         參數:
             j_offset (int, optional): 可選的外部偏移值。如果提供，則使用此值而不是內部 rainbow_j_offset。
-                                     這允許外部控制動畫狀態。
+            這允許外部控制動畫狀態。
         """
         if not self.strip or not self.is_on:
             return

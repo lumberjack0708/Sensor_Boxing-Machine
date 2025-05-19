@@ -128,7 +128,6 @@ class SensorHandler:
             if voltage > overall_max_voltage:
                 overall_max_voltage = voltage
         
-        # 為了簡化主控台輸出，可以選擇性地印出每個通道的詳細資訊
         for ch_name, ch_volt in channel_max_voltages.items():
             # print(f"  通道 {ch_name} 的最高電壓: {ch_volt:.3f} V") # 詳細日誌
             pass
@@ -147,15 +146,15 @@ class SensorHandler:
             bool: True 如果任何通道偵測到觸發，否則 False。
         """
         if not self.is_initialized or not self.adc_channels:
-            # print("SensorHandler 警告: ADS1115 未就緒，無法檢查拍擊觸發。") # 可能過於頻繁
+            # print("SensorHandler 警告: ADS1115 有問題，無法檢查拍擊觸發。") # 過於頻繁
             return False
         
         for channel_name, chan_obj in self.adc_channels.items():
             try:
-                # 為了速度，這裡只讀取一次電壓，不做延遲或迴圈
+                # 為求速度，只讀取一次電壓，不做延遲或迴圈
                 voltage = chan_obj.voltage 
                 if voltage > threshold:
-                    # print(f"SensorHandler: 偵測到通道 {channel_name} 觸發，電壓 {voltage:.3f}V > {threshold}V") # 除錯用
+                    # print(f"SensorHandler: 偵測到通道 {channel_name} 觸發，電壓 {voltage:.3f}V > {threshold}V") # 除錯
                     return True
             except Exception as e:
                 # print(f"SensorHandler: 檢查通道 {channel_name} 觸發時發生錯誤: {e}") # 可能過於頻繁

@@ -50,7 +50,7 @@ def main():
             print("警告: 部分核心模組未能成功初始化，程式功能可能受限或無法執行。")
             # 根據需求決定是否在此處退出，目前選擇繼續，讓使用者看到錯誤訊息
 
-        # 設定信號處理以優雅地處理 Ctrl+C
+        # 設定信號處理以處理 Ctrl+C
         running_main_loop = [True] # 使用列表以便在回調函數中修改
         def signal_handler_main(sig, frame):
             print("\n接收到中斷信號 (Ctrl+C)，正在準備退出主迴圈...")
