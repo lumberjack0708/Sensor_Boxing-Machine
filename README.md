@@ -145,6 +145,8 @@ RandomGenerate/
 
 *具體腳位定義 (如 GPIO、SPI、I2C) 及拍擊跳躍閾值等參數，請參考 [`system_configurator.py`](g:\CodeBase\Sensor_Boxing-Machine\system_configurator.py) 頂部的常數設定。*
 
+![電路圖](Circuit_diagram.png)
+
 ## 操作流程
 
 1.  **連接硬體**: 確保所有硬體元件 (包括 HDMI 顯示器、SPI LCD、LED 燈條、按鈕、感測器、ADC 模組及音訊輸出) 已根據 [`system_configurator.py`](g:\CodeBase\Sensor_Boxing-Machine\system_configurator.py) 中的腳位設定正確連接到 Raspberry Pi。
